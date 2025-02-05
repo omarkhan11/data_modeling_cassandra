@@ -6,7 +6,7 @@ import os
 import glob
 import numpy as np
 import json
-import csv 
+import csv
 
 # checking your current working directory
 print(os.getcwd())
@@ -41,7 +41,7 @@ for f in file_path_list:
 # uncomment the code below if you would like to get total number of rows 
 #print(len(full_data_rows_list))
 # uncomment the code below if you would like to check to see what the list of event data rows will look like
-print(full_data_rows_list)
+#print(full_data_rows_list)
 
 # creating a smaller event data csv file called event_datafile_full csv that will be used to insert data into the \
 # Apache Cassandra tables
@@ -55,134 +55,190 @@ with open('event_datafile_new.csv', 'w', encoding = 'utf8', newline='') as f:
         if (row[0] == ''):
             continue
         writer.writerow((row[0], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[12], row[13], row[16]))
-
 # check the number of rows in your csv file
 with open('event_datafile_new.csv', 'r', encoding = 'utf8') as f:
     print(sum(1 for line in f))
 
-# This should make a connection to a Cassandra instance your local machine 
-# (127.0.0.1)
-
+# CREATING A CLUSTER
 from cassandra.cluster import Cluster
 cluster = Cluster()
 
-# To establish connection and begin executing queries, need a session
+# CREATING THE SESSION
 session = cluster.connect()
 
-# This should make a connection to a Cassandra instance your local machine 
-# (127.0.0.1)
+# SESSION EXECUTION
+session.execute("""
+      CREATE KEYSPACE IF NOT EXISTS mykeyspace WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1};
+""")
 
-from cassandra.cluster import Cluster
-cluster = Cluster()
+# SETTING THE KEYSPACE
+session.set_keyspace("mykeyspace")
 
-# To establish connection and begin executing queries, need a session
-session = cluster.connect()
+## Create queries to ask the following three questions of the data
 
-# This should make a connection to a Cassandra instance your local machine 
-# (127.0.0.1)
+### 1. Give me the artist, song title and song's length in the music app history that was heard during  sessionId = 338, and itemInSession  = 4
 
-from cassandra.cluster import Cluster
-cluster = Cluster()
 
-# To establish connection and begin executing queries, need a session
-session = cluster.connect()
+### 2. Give me only the following: name of artist, song (sorted by itemInSession) and user (first and last name) for userid = 10, sessionid = 182
+    
 
-## TO-DO: Query 1:  Give me the artist, song title and song's length in the music app history that was heard during \
-## sessionId = 338, and itemInSession = 4
-table1 = """CREATE TABLE IF NOT EXISTS music_history2 (
-session_id int, item_in_session text, artist text, song_title text, song_length text, 
+### 3. Give me every user name (first and last) in my music app history who listened to the song 'All Hands Against His Own'
+
+# HERE WE ARE CREATING THE MUSIC_HISTORY_FINALVER 
+# WE HAVE SESSION_ID & ITEM_IN_SESSION AS THE PRIMARY KEYS BECAUSE WE WANT TO FILTER OUT TO SESSION_ID & ITEM_IN_SESSION 
+table1 = """CREATE TABLE IF NOT EXISTS music_history_finalver1 (
+session_id int, item_in_session int, artist text, song_title text, song_length float, 
 PRIMARY KEY(session_id, item_in_session))"""         
 
+# TABLE1 EXEUCTION
 session.execute(table1)
 
-# We have provided part of the code to set up the CSV file. Please complete the Apache Cassandra code below#
 file = 'event_datafile_new.csv'
 
+# WE ARE LOOPING THROUGH THE CSV
 with open(file, encoding = 'utf8') as f:
     csvreader = csv.reader(f)
     next(csvreader) # skip header
     for line in csvreader:
-## TO-DO: Assign the INSERT statements into the `query` variable
-        query = "INSERT INTO music_history2 (session_id, item_in_session, artist, song_title, song_length) VALUES (%s,%s,%s,%s,%s)"
-        #query = query + "(%s,%s,%s,%s,%s)"
-        ## TO-DO: Assign which column element should be assigned for each column in the INSERT statement.
-        ## For e.g., to INSERT artist_name and user first_name, you would change the code below to `line[0], line[1]`
-        session.execute(query, (line[9], line[3], line[0], line[10], line[5]))
+        # WE ARE INSERTING THE DATA FROM THE CSV INTO THE MUSIC_HISTORY_FINALVER TABLE
+        query = "INSERT INTO music_history_finalver1 (session_id, item_in_session, artist, song_title, song_length) VALUES (%s,%s,%s,%s,%s)"
+        session.execute(query, (int(line[8]), int(line[3]), line[0], line[10], float(line[5])))
+# THE QUERY WE WANNT TO EXECUTE 
+verification = "SELECT artist, song_title,song_length FROM music_history_finalver1 WHERE session_id = 338 and item_in_session = 4" 
 
-# We have provided part of the code to set up the CSV file. Please complete the Apache Cassandra code below#
-file = 'event_datafile_new.csv'
+# CREATING LISTS TO CREATE A DATAFRAME FOR THE RESULTS LATER ON
+artist = []
+song_title = []
+song_length = [] 
 
-## TO-DO: Add in the SELECT statement to verify the data was entered into the table
-verification = "SELECT artist, song_title,song_length FROM music_history2 WHERE session_id = '338' and item_in_session = '4'" 
-
+# EXECUTING THE RESULTS AND APPENDING THE DATA INTO THE CORRECT LISTS ABOVE
 try:
     results = session.execute(verification)
-    print(results)
+    for row in results:
+        artist.append(row[0])
+        song_title.append(row[1])
+        song_length.append(row[2])
 except Exception as error:
     print(error)
 
-## TO-DO: Query 2: Give me only the following: name of artist, song (sorted by itemInSession) and user (first and last name)\
-## for userid = 10, sessionid = 182
+# CREATING A DATAFRAME FOR THE RESULTS 
+try: 
+    df = pd.DataFrame({
+        "artist":artist,
+        "song_title":song_title,
+        "song_length": song_length
+    })
+    print(df)
+    #print(df(index=False)) -> WE CAN RUN THE RESULTS WITHOUT SEEING THE INDEX IF REQUIRED WHICH WILL CONVER THE DISPLAYED RESULTS INTO A STRING
+except Exception as error:
+    print(error)
 
-table2 = """CREATE TABLE IF NOT EXISTS user_information (user_id text, session_id text, artist text, song text, user_first_name text, user_last_name text,
-PRIMARY KEY(user_id, session_id))
-WITH CLUSTERING ORDER BY (session_id desc); 
+# WE ARE CREATING TABLE 2 (USER_INFORMATION_FINALVER)
+# WE ARE USING USER_ID AS THE PARTITION KEY WITH SESSION_ID AND ITEM_IN_SESSION BEING THE CLUSTERING COLUMNS TO CREATE THE UNIQUE PRIMARY KEY
+
+table2 = """CREATE TABLE IF NOT EXISTS user_information_finalver (user_id int, session_id int, item_in_session int, artist text, song text, user_first_name text, user_last_name text,
+PRIMARY KEY(user_id, session_id, item_in_session))
 """      
+# TABLE2 EXECUTION
 session.execute(table2)
 
-# We have provided part of the code to set up the CSV file. Please complete the Apache Cassandra code below#
 file = 'event_datafile_new.csv'
 
+# LOOPING THROUGH THE CSV
 with open(file, encoding = 'utf8') as f:
     csvreader = csv.reader(f)
     next(csvreader) # skip header
     for line in csvreader:
-## TO-DO: Assign the INSERT statements into the `query` variable
-        query = "INSERT INTO user_information (user_id, session_id, artist, song, user_first_name, user_last_name) VALUES (%s,%s,%s,%s,%s,%s)"
-        #query = query + "(%s,%s,%s,%s,%s)"
-        ## TO-DO: Assign which column element should be assigned for each column in the INSERT statement.
-        ## For e.g., to INSERT artist_name and user first_name, you would change the code below to `line[0], line[1]`
-        session.execute(query, (line[10], line[8], line[0], line[9], line[1], line[4]))
-        
-verification2 = "SELECT artist, song, user_first_name, user_last_name FROM user_information WHERE user_id = '10' and session_id = '182'"
+        # WE ARE INSERTING THE DATA FROM THE CSV INTO THE USER_INFORMATION_FINALVER TABLE
+        query = "INSERT INTO user_information_finalver (user_id, session_id, item_in_session, artist, song, user_first_name, user_last_name) VALUES (%s,%s,%s,%s,%s,%s,%s)"
+        session.execute(query, (int(line[10]), int(line[8]), int(line[3]), line[0], line[9], line[1], line[4]))
+
+# QUERY WE WANT TO EXECUTE
+verification2 = "SELECT artist, song, user_first_name, user_last_name FROM user_information_finalver WHERE user_id = 10 and session_id = 182"
+
+# CREATING LISTS TO CREATE A DATAFRAME FOR THE RESULTS LATER ON
+artist = []
+song = []
+user_first_name = []
+user_last_name = []
 try:
+    # EXECUTING THE RESULTS AND APPENDING THE DATA INTO THE CORRECT LISTS ABOVE
     results = session.execute(verification2)
-    print(results)
+    for rows in results:
+        artist.append(row[0])
+        song.append(rows[1]) 
+        user_first_name.append(rows[2])
+        user_last_name.append(rows[3])
 except Exception as error:
     print(error)
 
-## TO-DO: Query 3: Give me every user name (first and last) in my music app history who listened to the song 'All Hands Against His Own'
+# CREATING A DATAFRAME FOR THE RESULTS
+try: 
+    df = pd.DataFrame({
+    "artist":artist,
+    "song" : song, 
+    "user_first_name":user_first_name,
+    "user_last_name": user_last_name
+    })
+    print(df)
+    #print(df(index=False)) -> WE CAN RUN THE RESULTS WITHOUT SEEING THE INDEX IF REQUIRED WHICH WILL CONVER THE DISPLAYED RESULTS INTO A STRING
 
+except Exception as error: 
+    print(error)
 
-table3 = """CREATE TABLE IF NOT EXISTS listening_history (user_first_name text, user_last_name text, song text,
-PRIMARY KEY(song))
+# CREATING THE LISTENING_HISTORY_FINALVER TABLE 
+# THE PRIMARY KEYS ARE SONG AND USER_ID. SONG COMES FIRST BECAUSE WE WANT TO FILTER OUT TO SONGS AND USER ID IS THE CLUSTERING COLUMN TO ORDER THE DATA WITHIN EACH SONG PARTITION
+
+table3 = """CREATE TABLE IF NOT EXISTS listening_history_finalver (song text, user_id int, user_first_name text, user_last_name text,
+PRIMARY KEY(song, user_id))
 """      
+
+# TABLE3 EXECUTION
 session.execute(table3)
 
-# We have provided part of the code to set up the CSV file. Please complete the Apache Cassandra code below#
 file = 'event_datafile_new.csv'
 
+# LOOPING THROUGH THE CSV
 with open(file, encoding = 'utf8') as f:
     csvreader = csv.reader(f)
     next(csvreader) # skip header
     for line in csvreader:
-## TO-DO: Assign the INSERT statements into the `query` variable
-        query = "INSERT INTO listening_history (user_first_name, user_last_name, song) VALUES (%s,%s,%s)"
-        #query = query + "(%s,%s,%s,%s,%s)"
-        ## TO-DO: Assign which column element should be assigned for each column in the INSERT statement.
-        ## For e.g., to INSERT artist_name and user first_name, you would change the code below to `line[0], line[1]`
-        session.execute(query, (line[9], line[1], line[4]))
-        
-verification3 = "SELECT user_first_name, user_last_name FROM listening_history WHERE song = 'All Hands Against His Own'"
+        query = "INSERT INTO listening_history_finalver (song, user_id, user_first_name, user_last_name) VALUES (%s,%s,%s,%s)"
+        session.execute(query, (line[9], int(line[10]), line[1], line[4]))
+
+# QUERY WE WANT TO EXECUTE
+verification3 = "SELECT user_first_name, user_last_name FROM listening_history_finalver WHERE song = 'All Hands Against His Own'"
+
+# CREATING LISTS TO CREATE A DATAFRAME FOR THE RESULTS LATER ON
+user_first_name = []
+user_last_name = []
+
 try:
+    # EXECUTING THE RESULTS AND APPENDING THE DATA INTO THE CORRECT LISTS ABOVE
     results = session.execute(verification3)
-    print(results)
+    for rows in results:
+        user_first_name.append(rows[0])
+        user_last_name.append(rows[1])
+except Exception as error:
+    print(error)
+    
+# CREATING A DATAFRAME FOR THE RESULTS 
+try:
+    df = pd.DataFrame({
+        "user_first_name":user_first_name,
+        "user_last_name":user_last_name
+    })
+    print(df)
+    #print(df(index=False)) -> WE CAN RUN THE RESULTS WITHOUT SEEING THE INDEX IF REQUIRED WHICH WILL CONVER THE DISPLAYED RESULTS INTO A STRING
+
 except Exception as error:
     print(error)
 
-session.execute("DROP TABLE music_history2;")
-session.execute("DROP TABLE user_information;")
-session.execute("DROP TABLE listening_history;") 
+# DROPPING ALL THE TABLES
+session.execute("DROP TABLE music_history_finalver1;")
+session.execute("DROP TABLE user_information_finalver;")
+session.execute("DROP TABLE listening_history_finalver;")
 
+# CLOSING THE SESSION & CLUSTER
 session.shutdown()
 cluster.shutdown()
